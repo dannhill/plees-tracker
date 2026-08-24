@@ -237,13 +237,18 @@ object DataModel {
     }
 
     suspend fun insertSleep(sleep: Sleep) {
-        database.withTransaction {
+        insertSleepReturningId(sleep)
+    }
+
+    suspend fun insertSleepReturningId(sleep: Sleep): Int {
+        val sid = database.withTransaction {
             if (sleep.healthConnectId.isNotEmpty()) {
                 database.healthConnectDao().deleteDeletions(listOf(sleep.healthConnectId))
             }
-            database.sleepDao().insert(sleep)
+            database.sleepDao().insert(sleep).toInt()
         }
         scheduleHealthConnectSync()
+        return sid
     }
 
     private suspend fun insertSleeps(sleepList: List<Sleep>) {

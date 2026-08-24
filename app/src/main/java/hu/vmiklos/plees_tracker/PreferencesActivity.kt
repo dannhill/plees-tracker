@@ -24,6 +24,9 @@ import androidx.health.connect.client.HealthConnectClient
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.PreferenceManager
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepConfig
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepWorker
+import hu.vmiklos.plees_tracker.autosleep.UsageAccess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
@@ -43,6 +46,7 @@ class PreferencesActivity : AppCompatActivity() {
         private const val STATE_CHANGE_ACCOUNT_FREQUENCY = "changeAccountFrequency"
         private const val STATE_HEALTH_SETTINGS_PENDING = "healthSettingsPending"
         private const val STATE_HEALTH_CHECK_PENDING = "healthCheckPending"
+        private const val STATE_USAGE_ACCESS_SETTINGS_PENDING = "usageAccessSettingsPending"
         private const val HEALTH_CONNECT_WIPE_DELAY_SECONDS = 5
         private const val HEALTH_CONNECT_READ_TIMEOUT_MS = 30_000L
         private const val HEALTH_CONNECT_RETRY_INITIAL_DELAY_MS = 1_000L
@@ -58,6 +62,7 @@ class PreferencesActivity : AppCompatActivity() {
     // When the user ticks both "This device" and "Google Drive" in the add dialog, the folder
     // picker runs first; this flag makes its result chain into the Drive sign-in afterwards.
     private var addDriveAfterFolder = false
+    private var usageAccessSettingsPending = false
 
     // The folder destination to retire once a "back up to Drive instead" sign-in succeeds.
     private var replaceFolderOnSignIn: BackupDestination.LocalFolder? = null
@@ -124,6 +129,7 @@ class PreferencesActivity : AppCompatActivity() {
                 changeAccountFrom = BackupDestination.DriveAccount(email, frequency)
             }
             healthSettingsPending = state.getBoolean(STATE_HEALTH_SETTINGS_PENDING)
+            usageAccessSettingsPending = state.getBoolean(STATE_USAGE_ACCESS_SETTINGS_PENDING)
         }
         val persistedCheckPending = HealthConnectBackend.localPreferences(applicationContext)
             .getBoolean(HealthConnectBackend.CHECK_PENDING_KEY, false)
@@ -191,6 +197,27 @@ class PreferencesActivity : AppCompatActivity() {
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    fun showUsageAccessPermissionDialog() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.auto_sleep_permission_dialog_title)
+            .setMessage(R.string.auto_sleep_permission_dialog_message)
+            .setPositiveButton(R.string.auto_sleep_permission_open_settings) { _, _ ->
+                usageAccessSettingsPending = true
+                val launched = UsageAccess.openSettings(this)
+                if (!launched) {
+                    usageAccessSettingsPending = false
+                    refreshFragment()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                refreshFragment()
+            }
+            .setOnCancelListener {
+                refreshFragment()
+            }
             .show()
     }
 
@@ -493,6 +520,7 @@ class PreferencesActivity : AppCompatActivity() {
         outState.putString(STATE_CHANGE_ACCOUNT_FREQUENCY, changeAccountFrom?.frequency)
         outState.putBoolean(STATE_HEALTH_SETTINGS_PENDING, healthSettingsPending)
         outState.putBoolean(STATE_HEALTH_CHECK_PENDING, healthConnectCheckPending)
+        outState.putBoolean(STATE_USAGE_ACCESS_SETTINGS_PENDING, usageAccessSettingsPending)
     }
 
     override fun onStart() {
@@ -516,6 +544,21 @@ class PreferencesActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (usageAccessSettingsPending) {
+            usageAccessSettingsPending = false
+            val preferences = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+            if (UsageAccess.hasAccess(applicationContext)) {
+                preferences.edit {
+                    putBoolean(AutoSleepConfig.ENABLED_KEY, true)
+                }
+                AutoSleepWorker.schedule(applicationContext)
+            } else {
+                preferences.edit {
+                    putBoolean(AutoSleepConfig.ENABLED_KEY, false)
+                }
+            }
+            refreshFragment()
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             return
         }

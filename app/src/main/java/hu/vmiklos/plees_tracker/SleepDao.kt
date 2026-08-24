@@ -51,7 +51,7 @@ interface SleepDao {
     suspend fun insert(sleepList: List<Sleep>)
 
     @Insert
-    suspend fun insert(sleep: Sleep)
+    suspend fun insert(sleep: Sleep): Long
 
     @Update
     suspend fun update(sleep: Sleep)
@@ -64,6 +64,9 @@ interface SleepDao {
 
     @Query("SELECT COUNT(*) FROM sleep")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM sleep WHERE start_date < :stop AND stop_date > :start ORDER BY start_date ASC")
+    suspend fun getOverlapping(start: Long, stop: Long): List<Sleep>
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

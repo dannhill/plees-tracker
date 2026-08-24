@@ -310,4 +310,44 @@
     <string name="bedtime_toast">Reminders set for bedtime and wakeup</string>
     <string name="times_woken_up">Times Woken Up</string>
 
+    <!-- AutoSleep Preferences -->
+    <string name="settings_category_autosleep">Automatic sleep detection</string>
+    <string name="settings_auto_sleep_enabled">Automatic sleep detection</string>
+    <string name="settings_auto_sleep_summary">Automatically detect sleep sessions from device unlock events. Raw app-usage history is not stored.</string>
+    <string name="settings_auto_sleep_unsupported">Requires Android 9 or newer</string>
+    <string name="settings_auto_sleep_policy">Detection policy</string>
+    <string name="auto_sleep_policy_overnight_longest_gap">Overnight longest gap (recommended)</string>
+    <string name="auto_sleep_policy_pure_longest_gap">Pure longest gap</string>
+    <string-array name="auto_sleep_policy_entries">
+        <item>@string/auto_sleep_policy_overnight_longest_gap</item>
+        <item>@string/auto_sleep_policy_pure_longest_gap</item>
+    </string-array>
+    <string-array name="auto_sleep_policy_entry_values">
+        <item>OVERNIGHT_LONGEST_GAP</item>
+        <item>PURE_LONGEST_GAP</item>
+    </string-array>
+    <string name="settings_auto_sleep_save_mode">Save mode</string>
+    <string name="auto_sleep_save_mode_suggest">Suggest (confirm before saving)</string>
+    <string name="auto_sleep_save_mode_auto_save">Auto-save (save automatically)</string>
+    <string-array name="auto_sleep_save_mode_entries">
+        <item>@string/auto_sleep_save_mode_suggest</item>
+        <item>@string/auto_sleep_save_mode_auto_save</item>
+    </string-array>
+    <string-array name="auto_sleep_save_mode_entry_values">
+        <item>SUGGEST</item>
+        <item>AUTO_SAVE</item>
+    </string-array>
+    <string name="auto_sleep_permission_dialog_title">Usage access required</string>
+    <string name="auto_sleep_permission_dialog_message">Plees Tracker requires Usage Access permission to read device unlock events and detect when you were asleep. No app usage or personal data is collected or stored.</string>
+    <string name="auto_sleep_permission_open_settings">Open Settings</string>
+
+    <!-- AutoSleep MainActivity Candidate Dialog -->
+    <string name="auto_sleep_dialog_title">Sleep Detected</string>
+    <string name="auto_sleep_dialog_message">AutoSleep detected sleep from %1$s to %2$s (%3$s). Save this sleep record?</string>
+    <string name="auto_sleep_dialog_save">Save</string>
+    <string name="auto_sleep_dialog_discard">Discard</string>
+    <string name="auto_sleep_dialog_later">Later</string>
+    <string name="auto_sleep_saved">Sleep record saved</string>
+    <string name="auto_sleep_discarded">Sleep record discarded</string>
+
 </resources>

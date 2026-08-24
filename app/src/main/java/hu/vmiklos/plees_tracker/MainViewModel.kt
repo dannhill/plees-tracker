@@ -15,6 +15,8 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import androidx.preference.PreferenceManager
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepCandidateStore
+import hu.vmiklos.plees_tracker.autosleep.SleepCandidate
 import java.util.Calendar
 import java.util.Date
 import kotlinx.coroutines.launch
@@ -73,6 +75,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun insertSleep(sleep: Sleep) {
         viewModelScope.launch {
             DataModel.insertSleep(sleep)
+        }
+    }
+
+    /**
+     * Accepts an AutoSleep candidate, inserts it into Room, triggers Health Connect sync,
+     * performs database backup, clears the candidate from the pending store, and notifies callers.
+     */
+    fun acceptDetectedSleep(
+        candidate: SleepCandidate,
+        context: Context,
+        cr: ContentResolver,
+        onInserted: ((Int) -> Unit)? = null
+    ) {
+        viewModelScope.launch {
+            val sleep = Sleep().apply {
+                start = candidate.start
+                stop = candidate.stop
+            }
+            val sid = DataModel.insertSleepReturningId(sleep)
+            DataModel.backupSleeps(context, cr)
+            val store = AutoSleepCandidateStore(PreferenceManager.getDefaultSharedPreferences(context))
+            store.markAccepted(candidate)
+            onInserted?.invoke(sid)
         }
     }
 

@@ -15,3 +15,7 @@
 .cxx
 
 .idea/
+.kotlin/
+*.log
+/dist/
+app/keystore/

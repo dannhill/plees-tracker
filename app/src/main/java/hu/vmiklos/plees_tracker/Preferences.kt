@@ -12,12 +12,18 @@ import android.os.Bundle
 import android.util.Log
 import android.view.View
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.edit
 import androidx.lifecycle.lifecycleScope
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.PreferenceManager
 import androidx.preference.PreferenceViewHolder
 import androidx.preference.SwitchPreference
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepCandidateStore
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepConfig
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepWorker
+import hu.vmiklos.plees_tracker.autosleep.UsageAccess
 import kotlinx.coroutines.launch
 
 private class HealthConnectSwitchPreference(context: Context) : SwitchPreference(context) {
@@ -53,6 +59,7 @@ class Preferences : PreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.preferences, rootKey)
         setupBackupPreferences()
         setupHealthConnectPreference()
+        setupAutoSleepPreferences()
         val wakeup = findPreference<Preference>("wakeup")
         wakeup?.let {
             val preferences = DataModel.preferences
@@ -74,6 +81,64 @@ class Preferences : PreferenceFragmentCompat() {
     override fun onResume() {
         super.onResume()
         refreshHealthConnectState()
+        refreshAutoSleepState()
+    }
+
+    private fun setupAutoSleepPreferences() {
+        val enabledPref = findPreference<SwitchPreference>(AutoSleepConfig.ENABLED_KEY) ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            enabledPref.isEnabled = false
+            enabledPref.isChecked = false
+            enabledPref.summary = getString(R.string.settings_auto_sleep_unsupported)
+            return
+        }
+
+        enabledPref.setOnPreferenceChangeListener { _, newValue ->
+            val context = requireContext()
+            val activity = activity as? PreferencesActivity
+            if (newValue == true) {
+                if (UsageAccess.hasAccess(context)) {
+                    AutoSleepWorker.schedule(context)
+                    true
+                } else {
+                    activity?.showUsageAccessPermissionDialog()
+                    false
+                }
+            } else {
+                AutoSleepWorker.cancel(context)
+                AutoSleepCandidateStore(PreferenceManager.getDefaultSharedPreferences(context)).clear()
+                true
+            }
+        }
+    }
+
+    private fun refreshAutoSleepState() {
+        val enabledPref = findPreference<SwitchPreference>(AutoSleepConfig.ENABLED_KEY) ?: return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            enabledPref.isEnabled = false
+            enabledPref.isChecked = false
+            enabledPref.summary = getString(R.string.settings_auto_sleep_unsupported)
+            return
+        }
+
+        val context = requireContext()
+        val preferences = PreferenceManager.getDefaultSharedPreferences(context)
+        val storedEnabled = preferences.getBoolean(AutoSleepConfig.ENABLED_KEY, false)
+        val hasAccess = UsageAccess.hasAccess(context)
+
+        if (storedEnabled && !hasAccess) {
+            // Permission was revoked outside the app while enabled
+            preferences.edit {
+                putBoolean(AutoSleepConfig.ENABLED_KEY, false)
+            }
+            AutoSleepWorker.cancel(context)
+            AutoSleepCandidateStore(preferences).clear()
+            enabledPref.isChecked = false
+        } else {
+            enabledPref.isChecked = storedEnabled && hasAccess
+        }
+        enabledPref.isEnabled = true
+        enabledPref.summary = getString(R.string.settings_auto_sleep_summary)
     }
 
     private fun setupHealthConnectPreference() {

@@ -4,6 +4,42 @@ plugins {
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
+// Dynamic Versioning & Package ID Resolution
+def baseVersionCode = 66
+def baseVersionName = "26.8"
+def baseApplicationId = "hu.vmiklos.plees_tracker"
+
+def isAutoSleepMode = project.hasProperty("autosleep") ?
+    (project.property("autosleep") == null || project.property("autosleep").toString().trim() == "" || project.property("autosleep").toString().toBoolean() || project.property("autosleep").toString() == "true") :
+    (System.getenv("AUTOSLEEP") == "true")
+
+def customAppId = project.findProperty("autosleepApplicationId") ?:
+    project.findProperty("customApplicationId") ?:
+    System.getenv("AUTOSLEEP_APPLICATION_ID")
+
+def resolvedApplicationId = customAppId ?:
+    (isAutoSleepMode ? "hu.vmiklos.plees_tracker.autosleep" : baseApplicationId)
+
+def customVCode = project.findProperty("autosleepVersionCode") ?:
+    project.findProperty("customVersionCode") ?:
+    System.getenv("AUTOSLEEP_VERSION_CODE")
+
+def resolvedVersionCode = customVCode != null ?
+    customVCode.toString().toInteger() :
+    (isAutoSleepMode ? baseVersionCode + 100000 : baseVersionCode)
+
+def customVName = project.findProperty("autosleepVersionName") ?:
+    project.findProperty("customVersionName") ?:
+    System.getenv("AUTOSLEEP_VERSION_NAME")
+
+def resolvedVersionName = customVName != null ?
+    customVName.toString() :
+    (isAutoSleepMode ? "${baseVersionName}-autosleep" : baseVersionName)
+
+def getSigningProp(String propName, String envName) {
+    return project.findProperty(propName) ?: System.getenv(envName) ?: ""
+}
+
 android {
     kotlinOptions {
         kotlinOptions.allWarningsAsErrors = true
@@ -11,6 +47,7 @@ android {
     testOptions {
         unitTests.all {
             systemProperty 'user.timezone', 'UTC'
+            maxHeapSize = '2048m'
         }
     }
 
@@ -19,11 +56,11 @@ android {
     }
 
     defaultConfig {
-        applicationId "hu.vmiklos.plees_tracker"
+        applicationId resolvedApplicationId
         minSdkVersion 24
         targetSdkVersion 36
-        versionCode 66
-        versionName "26.8"
+        versionCode resolvedVersionCode
+        versionName resolvedVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         javaCompileOptions {
             annotationProcessorOptions {
@@ -31,12 +68,24 @@ android {
             }
         }
     }
+
+    def keystorePath = getSigningProp("signingStoreFile", "SIGNING_STORE_FILE")
+    if (!keystorePath) {
+        keystorePath = "keystore/plees_keystore.jks"
+    }
+    def keystoreFile = file(keystorePath)
+    def storePass = getSigningProp("signingStorePassword", "SIGNING_STORE_PASSWORD")
+    def keyAliasName = getSigningProp("signingKeyAlias", "SIGNING_KEY_ALIAS")
+    def keyPass = getSigningProp("signingKeyPassword", "SIGNING_KEY_PASSWORD")
+
     signingConfigs {
         release {
-            storeFile = file("keystore/plees_keystore.jks")
-            storePassword System.getenv("SIGNING_STORE_PASSWORD")
-            keyAlias System.getenv("SIGNING_KEY_ALIAS")
-            keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+            if (keystoreFile.exists() && storePass) {
+                storeFile = keystoreFile
+                storePassword = storePass
+                keyAlias = keyAliasName
+                keyPassword = keyPass
+            }
         }
     }
     buildTypes {
@@ -46,8 +95,10 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (file("keystore/plees_keystore.jks").exists()) {
+            if (keystoreFile.exists() && storePass) {
                 signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
             }
         }
     }

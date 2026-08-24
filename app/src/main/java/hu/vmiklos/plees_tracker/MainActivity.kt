@@ -45,12 +45,20 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.mikepenz.aboutlibraries.Libs
 import com.mikepenz.aboutlibraries.LibsBuilder
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepBackend
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepCandidateStore
+import hu.vmiklos.plees_tracker.autosleep.AutoSleepConfig
+import hu.vmiklos.plees_tracker.autosleep.SleepCandidate
+import hu.vmiklos.plees_tracker.autosleep.UsageAccess
 import hu.vmiklos.plees_tracker.calendar.CalendarImport
 import hu.vmiklos.plees_tracker.calendar.UserCalendar
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The activity is the primary UI of the app: allows starting and stopping the
@@ -62,6 +70,10 @@ class MainActivity : AppCompatActivity(), View.OnClickListener {
 
     // SharedPreferences keeps listeners in a WeakHashMap, so keep this as a member.
     private val sharedPreferenceListener = SharedPreferencesChangeListener()
+
+    // AutoSleep candidate confirmation dialog state
+    private var autoSleepDialogShownThisSession = false
+    private var autoSleepDialog: AlertDialog? = null
 
     private val exportPermissionLauncher = registerForActivityResult(
         RequestMultiplePermissions()
@@ -300,12 +312,133 @@ class MainActivity : AppCompatActivity(), View.OnClickListener {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        checkAndPromptAutoSleep()
+    }
+
     override fun onStop() {
         super.onStop()
         val intent = Intent(this, MainService::class.java)
         if (DataModel.start != null && DataModel.stop == null) {
             startService(intent)
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        autoSleepDialog?.let {
+            if (it.isShowing) {
+                it.dismiss()
+            }
+        }
+        autoSleepDialog = null
+    }
+
+    /**
+     * Checks if AutoSleep is enabled and permitted, triggers an asynchronous scan,
+     * and displays a confirmation dialog for pending candidates in SUGGEST mode.
+     */
+    private fun checkAndPromptAutoSleep() {
+        if (autoSleepDialogShownThisSession || autoSleepDialog?.isShowing == true) {
+            return
+        }
+
+        val preferences = PreferenceManager.getDefaultSharedPreferences(applicationContext)
+        val enabled = preferences.getBoolean(AutoSleepConfig.ENABLED_KEY, false)
+        if (!enabled || !UsageAccess.isSupported() || !UsageAccess.hasAccess(applicationContext)) {
+            return
+        }
+
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val backend = AutoSleepBackend.create(applicationContext)
+                    backend.scan()
+                } catch (e: Exception) {
+                    Log.e(TAG, "AutoSleep background scan failed", e)
+                }
+            }
+
+            if (isFinishing || isDestroyed) {
+                return@launch
+            }
+
+            val store = AutoSleepCandidateStore(preferences)
+            val pendingCandidates = store.getPendingCandidates()
+            if (pendingCandidates.isNotEmpty() &&
+                !autoSleepDialogShownThisSession &&
+                (autoSleepDialog == null || !autoSleepDialog!!.isShowing)
+            ) {
+                val candidate = pendingCandidates.first()
+                showAutoSleepCandidateDialog(candidate, store)
+            }
+        }
+    }
+
+    /**
+     * Presents a non-intrusive MaterialAlertDialog for the specified detected sleep candidate.
+     */
+    private fun showAutoSleepCandidateDialog(
+        candidate: SleepCandidate,
+        store: AutoSleepCandidateStore
+    ) {
+        if (isFinishing || isDestroyed) {
+            return
+        }
+
+        val compactView = DataModel.getCompactView()
+        val startStr = DataModel.formatTimestamp(Date(candidate.start), compactView)
+        val stopStr = DataModel.formatTimestamp(Date(candidate.stop), compactView)
+        val durationStr = DataModel.formatDuration(candidate.durationMs / 1000, compactView)
+
+        val message = getString(
+            R.string.auto_sleep_dialog_message,
+            startStr,
+            stopStr,
+            durationStr
+        )
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.auto_sleep_dialog_title))
+            .setMessage(message)
+            .setPositiveButton(getString(R.string.auto_sleep_dialog_save)) { dialogInterface, _ ->
+                dialogInterface.dismiss()
+                viewModel.acceptDetectedSleep(
+                    candidate,
+                    applicationContext,
+                    contentResolver
+                ) {
+                    Toast.makeText(
+                        this@MainActivity,
+                        getString(R.string.auto_sleep_saved),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    updateView()
+                }
+            }
+            .setNegativeButton(getString(R.string.auto_sleep_dialog_discard)) { dialogInterface, _ ->
+                dialogInterface.dismiss()
+                val now = System.currentTimeMillis()
+                store.markRejected(candidate, now)
+                Log.d(TAG, "AutoSleep candidate discarded: ${candidate.fingerprint}")
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.auto_sleep_discarded),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNeutralButton(getString(R.string.auto_sleep_dialog_later)) { dialogInterface, _ ->
+                dialogInterface.dismiss()
+            }
+            .setOnDismissListener {
+                autoSleepDialog = null
+            }
+            .create()
+
+        autoSleepDialog = dialog
+        autoSleepDialogShownThisSession = true
+        dialog.show()
     }
 
     override fun onClick(view: View?) {

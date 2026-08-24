@@ -45,6 +45,32 @@
         android:key="health_connect_category"
         android:title="@string/settings_health_connect_category" />
 
+    <PreferenceCategory
+        android:key="auto_sleep_category"
+        android:title="@string/settings_category_autosleep">
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="auto_sleep_enabled"
+            android:title="@string/settings_auto_sleep_enabled"
+            android:summary="@string/settings_auto_sleep_summary" />
+        <ListPreference
+            android:dependency="auto_sleep_enabled"
+            android:defaultValue="OVERNIGHT_LONGEST_GAP"
+            android:entries="@array/auto_sleep_policy_entries"
+            android:entryValues="@array/auto_sleep_policy_entry_values"
+            android:key="auto_sleep_policy"
+            android:title="@string/settings_auto_sleep_policy"
+            app:useSimpleSummaryProvider="true" />
+        <ListPreference
+            android:dependency="auto_sleep_enabled"
+            android:defaultValue="SUGGEST"
+            android:entries="@array/auto_sleep_save_mode_entries"
+            android:entryValues="@array/auto_sleep_save_mode_entry_values"
+            android:key="auto_sleep_save_mode"
+            android:title="@string/settings_auto_sleep_save_mode"
+            app:useSimpleSummaryProvider="true" />
+    </PreferenceCategory>
+
     <PreferenceCategory android:title="@string/settings_category_dashboard">
         <ListPreference
             android:key="dashboard_duration"

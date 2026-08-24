@@ -1,0 +1,214 @@
+name: Release Plees AutoSleep
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (build and test only, do not publish release)'
+        required: false
+        type: boolean
+        default: false
+      custom_version_name:
+        description: 'Custom Version Name (e.g., 1.0.5). Leave empty for auto-generated.'
+        required: false
+        type: string
+        default: ''
+      custom_version_code:
+        description: 'Custom Version Code (e.g., 100000005). Leave empty for auto-generated.'
+        required: false
+        type: string
+        default: ''
+      prerelease:
+        description: 'Mark release as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: Build, Test, Sign & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Ensure Android platform 37 is installed
+        run: |
+          sdkmanager "platforms;android-37" "build-tools;34.0.0" || true
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Compute monotonic release version
+        id: versioning
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.custom_version_name }}" ]; then
+            VERSION_NAME="${{ inputs.custom_version_name }}"
+            VERSION_CODE="${{ inputs.custom_version_code }}"
+            if [ -z "$VERSION_CODE" ]; then
+              VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+            fi
+            RELEASE_TAG="v${VERSION_NAME}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+            VERSION_NAME="${RELEASE_TAG#v}"
+            VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+          else
+            VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+            VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+            RELEASE_TAG="v${VERSION_NAME}"
+          fi
+
+          echo "Computed Version Name: ${VERSION_NAME}"
+          echo "Computed Version Code: ${VERSION_CODE}"
+          echo "Computed Release Tag:  ${RELEASE_TAG}"
+
+          echo "AUTOSLEEP_VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "AUTOSLEEP_VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+
+          echo "version_name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version_code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore signing keystore
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.AUTOSLEEP_KEYSTORE_B64 || secrets.KEYSTORE || secrets.SIGNING_KEYSTORE_B64 }}
+        run: |
+          mkdir -p app/keystore
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > app/keystore/plees_keystore.jks
+            chmod 600 app/keystore/plees_keystore.jks
+            echo "Keystore restored successfully."
+          else
+            echo "::warning::Keystore secret not found. Build will proceed unsigned/debug."
+          fi
+
+      - name: Run unit tests and assemble signed FOSS release
+        env:
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD || secrets.AUTOSLEEP_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS || secrets.AUTOSLEEP_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || secrets.AUTOSLEEP_KEY_PASSWORD }}
+          AUTOSLEEP_VERSION_CODE: ${{ env.VERSION_CODE }}
+          AUTOSLEEP_VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          ./gradlew clean testFossDebugUnitTest assembleFossRelease -Pautosleep=true
+
+      - name: Package release assets and compute checksums
+        shell: bash
+        run: |
+          mkdir -p dist
+          APK_PATH=$(find app/build/outputs/apk/foss/release -maxdepth 1 -type f -name '*.apk' ! -name '*unsigned*' | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find app/build/outputs/apk/foss/release -maxdepth 1 -type f -name '*.apk' | head -n 1)
+          fi
+
+          if [ -z "$APK_PATH" ] || [ ! -f "$APK_PATH" ]; then
+            echo "::error::Release APK not found in app/build/outputs/apk/foss/release/"
+            exit 1
+          fi
+
+          echo "Found release APK: $APK_PATH"
+
+          # 1. Primary named asset (plees-autosleep-v${VERSION_NAME}.apk)
+          cp "$APK_PATH" "dist/plees-autosleep-v${VERSION_NAME}.apk"
+
+          # 2. Standardized compatibility alias (Plees-AutoSleep-foss-release.apk)
+          cp "$APK_PATH" "dist/Plees-AutoSleep-foss-release.apk"
+
+          # 3. Compute SHA-256 checksums
+          cd dist
+          sha256sum "plees-autosleep-v${VERSION_NAME}.apk" > SHA256SUMS.txt
+          sha256sum "Plees-AutoSleep-foss-release.apk" >> SHA256SUMS.txt
+          sha256sum "plees-autosleep-v${VERSION_NAME}.apk" > "plees-autosleep-v${VERSION_NAME}.apk.sha256"
+          cd ..
+
+          echo "Package directory contents:"
+          ls -la dist/
+
+      - name: Upload build artifacts (CI pipeline)
+        uses: actions/upload-artifact@v4
+        with:
+          name: plees-autosleep-release-${{ env.RELEASE_TAG }}
+          path: dist/*
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: "Plees AutoSleep v${{ env.VERSION_NAME }}"
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          make_latest: true
+          generate_release_notes: true
+          files: |
+            dist/plees-autosleep-v${{ env.VERSION_NAME }}.apk
+            dist/Plees-AutoSleep-foss-release.apk
+            dist/SHA256SUMS.txt
+            dist/plees-autosleep-v${{ env.VERSION_NAME }}.apk.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify published release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Verifying published release for tag: $RELEASE_TAG"
+          LATEST_TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          LATEST_FLAG=$(gh release list --json isLatest --jq '.[0].isLatest')
+          
+          echo "Latest tag on repository: $LATEST_TAG"
+          echo "Is marked latest: $LATEST_FLAG"
+
+          if [ "$LATEST_TAG" != "$RELEASE_TAG" ]; then
+            echo "::error::Latest release tag ($LATEST_TAG) does not match current run ($RELEASE_TAG)"
+            exit 1
+          fi
+
+          if [ "$LATEST_FLAG" != "true" ]; then
+            echo "::error::Release $RELEASE_TAG is not marked as latest release"
+            exit 1
+          fi
+
+          ASSETS=$(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+          echo "Published release assets:"
+          echo "$ASSETS"
+
+          echo "$ASSETS" | grep -q "plees-autosleep-v${VERSION_NAME}.apk" || { echo "::error::Primary APK missing from release assets"; exit 1; }
+          echo "$ASSETS" | grep -q "SHA256SUMS.txt" || { echo "::error::SHA256SUMS.txt missing from release assets"; exit 1; }
+
+          echo "Release verification passed successfully."
