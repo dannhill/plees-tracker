@@ -50,6 +50,13 @@
                 android:name="android.support.PARENT_ACTIVITY"
                 android:value=".MainActivity" />
         </activity>
+        <activity
+            android:name=".TableActivity"
+            android:label="@string/table_view">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value=".GraphsActivity" />
+        </activity>
         <activity android:name=".PreferencesActivity" />
         <activity
             android:name=".HealthConnectRationaleActivity"

@@ -6,6 +6,7 @@
 
 package hu.vmiklos.plees_tracker
 
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.Menu
@@ -21,6 +22,7 @@ import com.github.mikephil.charting.components.XAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.formatter.ValueFormatter
 import java.util.Calendar
 import java.util.Date
 import kotlin.math.sqrt
@@ -48,9 +50,14 @@ class GraphsActivity : AppCompatActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.graph_deficit, R.id.graph_length, R.id.graph_start,
-            R.id.graph_stop, R.id.graph_rating, R.id.graph_variance -> {
+            R.id.graph_stop, R.id.graph_rating, R.id.graph_variance,
+            R.id.graph_midpoint, R.id.graph_debt_7d -> {
                 selectedChartId = item.itemId
                 renderChartById(selectedChartId)
+            }
+            R.id.menu_table_view -> {
+                startActivity(Intent(this, TableActivity::class.java))
+                true
             }
             android.R.id.home -> {
                 this.finish()
@@ -114,6 +121,8 @@ class GraphsActivity : AppCompatActivity() {
             R.id.graph_stop -> renderStopChart()
             R.id.graph_rating -> renderRatingChart()
             R.id.graph_variance -> renderVarianceChart()
+            R.id.graph_midpoint -> renderMidpointChart()
+            R.id.graph_debt_7d -> renderDebt7dChart()
             else -> false
         }
     }
@@ -195,11 +204,13 @@ class GraphsActivity : AppCompatActivity() {
 
                 val startDataSet = startByDay.toDataSet(
                     R.string.graph_start,
-                    ContextCompat.getColor(this, R.color.dash_daily)
+                    ContextCompat.getColor(this, R.color.dash_daily),
+                    TimeAxisFormatter()
                 )
                 val startAvgDataSet = startAvg.toDataSet(
                     R.string.graph_average,
-                    ContextCompat.getColor(this, R.color.dash_average)
+                    ContextCompat.getColor(this, R.color.dash_average),
+                    TimeAxisFormatter()
                 )
 
                 renderChart {
@@ -224,11 +235,13 @@ class GraphsActivity : AppCompatActivity() {
 
                 val stopDataSet = stopByDay.toDataSet(
                     R.string.graph_stop,
-                    ContextCompat.getColor(this, R.color.dash_daily)
+                    ContextCompat.getColor(this, R.color.dash_daily),
+                    TimeAxisFormatter()
                 )
                 val stopAvgDataSet = stopAvg.toDataSet(
                     R.string.graph_average,
-                    ContextCompat.getColor(this, R.color.dash_average)
+                    ContextCompat.getColor(this, R.color.dash_average),
+                    TimeAxisFormatter()
                 )
 
                 renderChart {
@@ -302,6 +315,63 @@ class GraphsActivity : AppCompatActivity() {
         return true
     }
 
+    private fun renderMidpointChart(): Boolean {
+        title = getString(R.string.graph_midpoint)
+
+        viewModel.durationSleepsLive.observe(
+            this
+        ) { sleeps ->
+            if (sleeps != null && sleeps.isNotEmpty()) {
+                val midpointByDay = sleeps.midpointOfSleepByDay()
+                val midpointAvg = midpointByDay.cumulativeAverage()
+
+                val midpointDataSet = midpointByDay.toDataSet(
+                    R.string.graph_midpoint,
+                    ContextCompat.getColor(this, R.color.dash_daily),
+                    TimeAxisFormatter()
+                )
+                val midpointAvgDataSet = midpointAvg.toDataSet(
+                    R.string.graph_average,
+                    ContextCompat.getColor(this, R.color.dash_average),
+                    TimeAxisFormatter()
+                )
+
+                renderChart {
+                    chart.axisLeft.valueFormatter = TimeAxisFormatter()
+                    setChartAxisLeftLabel(null)
+                    chart.data = LineData(midpointDataSet, midpointAvgDataSet)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun renderDebt7dChart(): Boolean {
+        title = getString(R.string.graph_debt_7d)
+
+        viewModel.durationSleepsLive.observe(
+            this
+        ) { sleeps ->
+            if (sleeps != null && sleeps.isNotEmpty()) {
+                val debtByDay = sleeps.debt7dByDay(getIdealSleep())
+
+                val debtDataSet = debtByDay.toDataSet(
+                    R.string.graph_debt_7d,
+                    ContextCompat.getColor(this, R.color.dash_daily),
+                    FloatAxisFormatter()
+                )
+
+                renderChart {
+                    chart.axisLeft.valueFormatter = FloatAxisFormatter()
+                    chart.axisLeft.granularity = 0.5f
+                    setChartAxisLeftLabel(getString(R.string.graph_hours))
+                    chart.data = LineData(debtDataSet)
+                }
+            }
+        }
+        return true
+    }
+
     /** Obtain ideal sleep float from preferences. */
     private fun getIdealSleep(): Float {
         val idealSleepStr = preferences.getString("ideal_sleep_length", "8.0") ?: "8.0"
@@ -332,16 +402,25 @@ class GraphsActivity : AppCompatActivity() {
     }
 
     /** Converts raw day-value points into a [LineDataSet] with default values. */
-    private fun List<Pair<Number, Number>>.toDataSet(label_key: Int, color: Int): LineDataSet {
+    private fun List<Pair<Number, Number>>.toDataSet(
+        label_key: Int,
+        color: Int,
+        formatter: ValueFormatter = FloatAxisFormatter()
+    ): LineDataSet {
         return LineDataSet(
             map { (day, value) -> Entry(day.toFloat(), value.toFloat()) },
             getString(label_key)
         ).apply {
             lineWidth = if (size > 250) 2f else 3f
             this.color = color
-            setDrawCircles(false)
+            setDrawCircles(size <= 60)
+            circleRadius = 3f
+            setCircleColor(color)
             setDrawCircleHole(false)
-            setDrawValues(false)
+            setDrawValues(true)
+            valueTextSize = 9f
+            valueTextColor = ContextCompat.getColor(this@GraphsActivity, R.color.textColor)
+            valueFormatter = formatter
         }
     }
 
@@ -411,6 +490,34 @@ class GraphsActivity : AppCompatActivity() {
     /** Given a list of sleeps, groups sleeps by date of stop time. */
     private fun List<Sleep>.groupSleepsByDay(): Map<Long, List<Sleep>> {
         return groupBy { it.stop.stripTime() }
+    }
+
+    /** Given a list of sleeps, returns list of day -> midpoint of sleep pairs, sorted by day. */
+    fun List<Sleep>.midpointOfSleepByDay(): List<Pair<Long, Long>> {
+        return groupSleepsByDay()
+            .map { (day, daySleeps) ->
+                val start = daySleeps.earliestSleep().start
+                val stop = daySleeps.latestSleep().stop
+                val midpoint = start + (stop - start) / 2
+                day to (midpoint - day)
+            }
+            .sortedBy { it.first }
+    }
+
+    /** Given a list of sleeps, returns list of day -> 7-day rolling sleep debt pairs, sorted by day. */
+    fun List<Sleep>.debt7dByDay(idealSleep: Float): List<Pair<Long, Float>> {
+        return lengthPerDay().rolling7dDebt(idealSleep)
+    }
+}
+
+/** Calculates trailing 7-day sleep debt vs ideal sleep for each day in sequence. */
+fun List<Pair<Long, Float>>.rolling7dDebt(idealSleep: Float): List<Pair<Long, Float>> {
+    return mapIndexed { index, (day, _) ->
+        val startIdx = maxOf(0, index - 6)
+        val window = subList(startIdx, index + 1)
+        val sum = window.sumOf { it.second.toDouble() }.toFloat()
+        val expected = window.size * idealSleep
+        day to (sum - expected)
     }
 }
 

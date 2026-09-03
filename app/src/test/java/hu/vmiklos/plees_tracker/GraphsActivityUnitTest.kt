@@ -73,4 +73,53 @@ class GraphsActivityUnitTest {
         )
         assertEquals(expected, data.asSequence().cumulativeVariance().toList())
     }
+
+    @Test
+    fun `test rolling7dDebt()`() {
+        val daysData = listOf(
+            1L to 8f,
+            2L to 7f,
+            3L to 6f,
+            4L to 9f,
+            5L to 8f,
+            6L to 8f,
+            7L to 8f,
+            8L to 10f
+        )
+        // ideal = 8f
+        // day 1: (8) - (1*8) = 0
+        // day 2: (8+7) - (2*8) = -1
+        // day 3: (8+7+6) - (3*8) = -3
+        // day 4: (8+7+6+9) - (4*8) = -2
+        // day 5: (8+7+6+9+8) - (5*8) = -2
+        // day 6: (8+7+6+9+8+8) - (6*8) = -2
+        // day 7: (8+7+6+9+8+8+8) - (7*8) = -2
+        // day 8: (7+6+9+8+8+8+10) - (7*8) = 56 - 56 = 0
+        val expected = listOf(
+            1L to 0f,
+            2L to -1f,
+            3L to -3f,
+            4L to -2f,
+            5L to -2f,
+            6L to -2f,
+            7L to -2f,
+            8L to 0f
+        )
+        assertEquals(expected, daysData.rolling7dDebt(8f))
+    }
+
+    @Test
+    fun `test FloatAxisFormatter`() {
+        val formatter = FloatAxisFormatter()
+        assertEquals("7.5", formatter.getFormattedValue(7.5f))
+        assertEquals("0", formatter.getFormattedValue(0f))
+        assertEquals("-2.3", formatter.getFormattedValue(-2.3f))
+    }
+
+    @Test
+    fun `test TimeAxisFormatter`() {
+        val formatter = TimeAxisFormatter()
+        assertEquals("00:00", formatter.getFormattedValue(0f))
+        assertEquals("01:30", formatter.getFormattedValue((90 * 60 * 1000).toFloat()))
+    }
 }
